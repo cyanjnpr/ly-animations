@@ -4,6 +4,7 @@ pub const Animation = enum {
     matrix,
     colormix,
     gameoflife,
+    datastream,
 };
 
 pub const DisplayServer = enum {
