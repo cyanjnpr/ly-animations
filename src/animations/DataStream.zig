@@ -35,7 +35,6 @@ blocks_width: usize,
 min_delay: usize,
 max_delay: usize,
 display_binary: bool,
-display_symbols: bool,
 
 pub fn init(
     allocator: Allocator,
@@ -46,7 +45,6 @@ pub fn init(
     min_delay: usize,
     max_delay: usize,
     display_binary: bool,
-    display_symbols: bool,
 ) !DataStream {
     const blocks = try allocator.alloc(Block, blocks_num);
     const blocks_width = (terminal_buffer.width - SPACE_BETWEEN * (blocks_num - 1));
@@ -65,7 +63,6 @@ pub fn init(
         .min_delay = min_delay,
         .max_delay = max_delay,
         .display_binary = display_binary,
-        .display_symbols = display_symbols,
     };
 }
 
@@ -110,15 +107,9 @@ fn draw(self: *DataStream) void {
             for (0..block.width) |x| {
                 const di = @mod(y + block.offset, self.terminal_buffer.height) * self.blocks_width +
                     x + dots_offset;
-                var ch: u32 = '0';
-                if (self.display_binary) {
-                    ch = if (self.display_symbols) bin_symbol(self.dots[di]) else bin_value(self.dots[di]);
-                } else {
-                    ch = if (self.display_symbols) full_symbol(self.dots[di]) else full_value(self.dots[di]);
-                }
 
                 const cell = Cell{
-                    .ch = ch,
+                    .ch = if (self.display_binary) bin_value(self.dots[di]) else hex_value(self.dots[di]),
                     .fg = self.fg,
                     .bg = self.terminal_buffer.bg,
                 };
@@ -181,19 +172,7 @@ fn bin_value(dot: Dot) u32 {
     return value + 48;
 }
 
-fn full_value(dot: Dot) u32 {
+fn hex_value(dot: Dot) u32 {
     if (dot.value < 10) return dot.value + 48;
     return dot.value + 87;
-}
-
-fn bin_symbol(dot: Dot) u32 {
-    const value = @mod(dot.value, 2);
-    if (value == 0) return 0x2592;
-    return 0x2588;
-}
-
-fn full_symbol(dot: Dot) u32 {
-    const value = @mod(dot.value, 4);
-    if (value == 3) return value + 0x2585;
-    return value + 0x2591;
 }
