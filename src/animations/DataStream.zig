@@ -8,11 +8,6 @@ const Random = std.Random;
 
 // inspired by cyberpunk 2077 in-game screens
 
-pub const BIDIRECTIONAL = false;
-pub const FG_COLOR = 0x0000FFFF;
-pub const DELAY_MIN: usize = 8;
-pub const DELAY_MAX: usize = 12;
-pub const BLOCKS_NUM: usize = 9;
 pub const SPACE_BETWEEN: usize = 2;
 
 const DataStream = @This();
@@ -36,19 +31,35 @@ pub const Block = struct {
 allocator: Allocator,
 terminal_buffer: *TerminalBuffer,
 blocks: []Block,
+fg: u32,
+bidirectional: bool,
+blocks_num: u32,
+min_delay: usize,
+max_delay: usize,
 
-pub fn init(allocator: Allocator, terminal_buffer: *TerminalBuffer) !DataStream {
-    const blocks = try allocator.alloc(Block, BLOCKS_NUM);
-    const blocks_width = (terminal_buffer.width - SPACE_BETWEEN * (BLOCKS_NUM - 1));
-    const avg_width = blocks_width / BLOCKS_NUM;
+pub fn init(
+    allocator: Allocator,
+    terminal_buffer: *TerminalBuffer,
+    fg: u32,
+    blocks_num: u32,
+    bidirectional: bool,
+    min_delay: usize,
+    max_delay: usize,
+) !DataStream {
+    const blocks = try allocator.alloc(Block, blocks_num);
+    const blocks_width = (terminal_buffer.width - SPACE_BETWEEN * (blocks_num - 1));
+    const avg_width = blocks_width / blocks_num;
     for (0..blocks.len) |i| {
         var block_width = avg_width;
         if (i == blocks.len / 2) {
-            block_width += @mod(blocks_width, BLOCKS_NUM);
+            block_width += @mod(blocks_width, blocks_num);
         }
         blocks[i] = try newBlock(
             allocator,
             terminal_buffer,
+            bidirectional,
+            min_delay,
+            max_delay,
             block_width,
         );
     }
@@ -57,18 +68,23 @@ pub fn init(allocator: Allocator, terminal_buffer: *TerminalBuffer) !DataStream 
         .allocator = allocator,
         .terminal_buffer = terminal_buffer,
         .blocks = blocks,
+        .fg = fg,
+        .blocks_num = blocks_num,
+        .bidirectional = bidirectional,
+        .min_delay = min_delay,
+        .max_delay = max_delay,
     };
 }
 
-fn newBlock(allocator: Allocator, terminal_buffer: *TerminalBuffer, width: usize) !Block {
+fn newBlock(allocator: Allocator, terminal_buffer: *TerminalBuffer, bidirectional: bool, min_delay: usize, max_delay: usize, width: usize) !Block {
     var direction: u1 = 1;
-    if (BIDIRECTIONAL) {
+    if (bidirectional) {
         direction = terminal_buffer.random.int(u1);
     }
     const block = Block{
         .lines = try allocator.alloc(Line, terminal_buffer.height),
         .direction = direction,
-        .delay = @mod(terminal_buffer.random.int(u16), DELAY_MAX - DELAY_MIN) + DELAY_MIN,
+        .delay = @mod(terminal_buffer.random.int(u16), max_delay - min_delay) + min_delay,
         .offset = 0,
         .count = 0,
     };
@@ -107,9 +123,13 @@ fn deinit(self: *DataStream) void {
 }
 
 fn realloc(_: *DataStream) anyerror!void {
-    // const blocks = try self.allocator.realloc(self.blocks, BLOCKS_NUM);
     // for (self.blocks, 0..) |block, i| {
-    //     self.blocks[i].lines = try self.allocator.realloc(block.lines, )
+    //     if (self.terminal_buffer.height < block.lines.len) {
+    //         for (block.lines, self.terminal_buffer.height..) |line, j| {
+    //             _ = j;
+    //             self.allocator.free(line.dots);
+    //         }
+    //     }
     // }
 }
 
@@ -136,7 +156,7 @@ fn draw(self: *DataStream) void {
             for (line.dots, 0..) |dot, x| {
                 const cell = Cell{
                     .ch = hex_value(dot),
-                    .fg = FG_COLOR,
+                    .fg = self.fg,
                     .bg = self.terminal_buffer.bg,
                 };
 

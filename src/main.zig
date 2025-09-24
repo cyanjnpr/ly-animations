@@ -491,7 +491,7 @@ pub fn main() !void {
             animation = game_of_life.animation();
         },
         .datastream => {
-            var datastream = try DataStream.init(allocator, &buffer);
+            var datastream = try DataStream.init(allocator, &buffer, config.datastream_fg, config.datastream_blocks, config.datastream_bidirectional, config.datastream_delay_min, config.datastream_delay_max);
             animation = datastream.animation();
         },
     }

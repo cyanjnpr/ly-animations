@@ -1,4 +1,4 @@
-# The Ly display manager
+# Fork of the Ly display manager
 
 ![Ly screenshot](.github/screenshot.png "Ly screenshot")
 
