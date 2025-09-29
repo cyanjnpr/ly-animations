@@ -151,10 +151,13 @@ fn initArrays(
     }
 
     const avg_width = blocks_width / blocks.len;
+    var r = @mod(blocks_width, blocks.len);
+    const modulo = r;
     for (0..blocks.len) |i| {
         var block_width = avg_width;
-        if (i == blocks.len / 2) {
-            block_width += @mod(blocks_width, blocks.len);
+        if (blocks.len <= modulo + (i + 1) * 2 and r > 0) {
+            block_width += 1;
+            r -= 1;
         }
 
         blocks[i] = Block{

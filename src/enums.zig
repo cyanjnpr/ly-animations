@@ -5,6 +5,8 @@ pub const Animation = enum {
     colormix,
     gameoflife,
     datastream,
+    blackwall,
+    interference,
 };
 
 pub const DisplayServer = enum {
