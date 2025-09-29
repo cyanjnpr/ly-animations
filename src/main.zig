@@ -15,7 +15,6 @@ const Dummy = @import("animations/Dummy.zig");
 const Matrix = @import("animations/Matrix.zig");
 const GameOfLife = @import("animations/GameOfLife.zig");
 const DataStream = @import("animations/DataStream.zig");
-const Blackwall = @import("animations/Blackwall.zig");
 const Interference = @import("animations/Interference.zig");
 
 const Animation = @import("tui/Animation.zig");
@@ -496,12 +495,8 @@ pub fn main() !void {
             var datastream = try DataStream.init(allocator, &buffer, config.datastream_fg, config.datastream_blocks, config.datastream_bidirectional, config.datastream_delay_min, config.datastream_delay_max, config.datastream_binary);
             animation = datastream.animation();
         },
-        .blackwall => {
-            var blackwall = try Blackwall.init(allocator, &buffer);
-            animation = blackwall.animation();
-        },
         .interference => {
-            var interference = try Interference.init(allocator, &buffer);
+            var interference = try Interference.init(allocator, &buffer, config.interference_fg, config.interference_time_scale, config.interference_distance_scale);
             animation = interference.animation();
         },
     }

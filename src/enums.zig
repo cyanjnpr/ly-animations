@@ -5,7 +5,6 @@ pub const Animation = enum {
     colormix,
     gameoflife,
     datastream,
-    blackwall,
     interference,
 };
 
