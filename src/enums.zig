@@ -6,6 +6,7 @@ pub const Animation = enum {
     gameoflife,
     datastream,
     interference,
+    kiroshi,
 };
 
 pub const DisplayServer = enum {

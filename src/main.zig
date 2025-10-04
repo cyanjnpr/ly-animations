@@ -16,6 +16,7 @@ const Matrix = @import("animations/Matrix.zig");
 const GameOfLife = @import("animations/GameOfLife.zig");
 const DataStream = @import("animations/DataStream.zig");
 const Interference = @import("animations/Interference.zig");
+const Kiroshi = @import("animations/Kiroshi.zig");
 
 const Animation = @import("tui/Animation.zig");
 const TerminalBuffer = @import("tui/TerminalBuffer.zig");
@@ -496,8 +497,12 @@ pub fn main() !void {
             animation = datastream.animation();
         },
         .interference => {
-            var interference = try Interference.init(allocator, &buffer, config.interference_fg, config.interference_time_scale, config.interference_distance_scale);
+            var interference = try Interference.init(allocator, &buffer, config.interference_fg, config.interference_time_scale, config.interference_distance_scale, config.interference_corner_variant);
             animation = interference.animation();
+        },
+        .kiroshi => {
+            var kiroshi = try Kiroshi.init(allocator, &buffer);
+            animation = kiroshi.animation();
         },
     }
     defer animation.deinit();
