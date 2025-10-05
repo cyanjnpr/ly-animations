@@ -69,6 +69,10 @@ pub fn build(b: *std.Build) !void {
 
     exe.root_module.addOptions("build_options", build_options);
 
+    const znoise = b.dependency("znoise", .{});
+    exe.root_module.addImport("znoise", znoise.module("root"));
+    exe.linkLibrary(znoise.artifact("FastNoiseLite"));
+
     const clap = b.dependency("clap", .{ .target = target, .optimize = optimize });
     exe.root_module.addImport("clap", clap.module("clap"));
 

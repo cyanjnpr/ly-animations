@@ -18,6 +18,7 @@ const DataStream = @import("animations/DataStream.zig");
 const Interference = @import("animations/Interference.zig");
 const Kiroshi = @import("animations/Kiroshi.zig");
 const Arrowheads = @import("animations/Arrowheads.zig");
+const Perlin = @import("animations/Perlin.zig");
 
 const Animation = @import("tui/Animation.zig");
 const TerminalBuffer = @import("tui/TerminalBuffer.zig");
@@ -511,6 +512,10 @@ pub fn main() !void {
             const box_height = (2 * config.margin_box_v) + 7;
             var arrowheads = try Arrowheads.init(allocator, &buffer, box_len, box_height, config.arrowheads_col1, config.arrowheads_col2, config.arrowheads_col3, config.arrowheads_delay, config.arrowheads_size);
             animation = arrowheads.animation();
+        },
+        .perlin => {
+            var perlin = try Perlin.init(allocator, &buffer, config.perlin_fg, config.perlin_time_scale, config.perlin_distance_scale, config.perlin_direction_diagonal);
+            animation = perlin.animation();
         },
     }
     defer animation.deinit();

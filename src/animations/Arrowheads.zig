@@ -21,7 +21,7 @@ delay: usize,
 count: usize,
 offset: i32,
 line_gap_period: usize,
-char_gpa_period: usize,
+char_gap_period: usize,
 expand_size: i32,
 palette: [PALETTE_LEN]Cell,
 
@@ -45,7 +45,7 @@ pub fn init(
         .count = 0,
         .offset = 0,
         .line_gap_period = 2,
-        .char_gpa_period = 2,
+        .char_gap_period = 2,
         .expand_size = @intCast(expand_size),
         .palette = [PALETTE_LEN]Cell{
             Cell.init('.', col1, terminal_buffer.bg),
@@ -85,7 +85,7 @@ fn draw(self: *Arrowheads) void {
     var x_offset = @as(i32, @intFromFloat(@as(f32, @floatFromInt(self.offset)) * ratio));
     if (x_start + self.expand_size - x_offset < 0 and y_start + self.expand_size - self.offset < 0) {
         self.line_gap_period = @as(usize, @intCast(self.terminal_buffer.random.int(u4))) + 2;
-        self.char_gpa_period = @as(usize, @intCast(self.terminal_buffer.random.int(u4))) + 2;
+        self.char_gap_period = @as(usize, @intCast(self.terminal_buffer.random.int(u4))) + 2;
         self.offset = 0;
         x_offset = 0;
     }
@@ -106,7 +106,7 @@ fn draw(self: *Arrowheads) void {
                     (left >= 0 and right <= 0)))
             {
                 if (@mod(@as(usize, @intCast(distance)), self.line_gap_period) == self.line_gap_period - 1) continue;
-                if (@mod(x_u + y_u * y_u, self.char_gpa_period) == self.char_gpa_period - 1) continue;
+                if (@mod(x_u + y_u * y_u, self.char_gap_period) == self.char_gap_period - 1) continue;
 
                 self.palette[
                     @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(PALETTE_LEN - 1)) *
