@@ -7,9 +7,12 @@ const Allocator = std.mem.Allocator;
 const Random = std.Random;
 
 // WIP
+// WIP
+// WIP
 // inspired by cyberpunk 2077 kiroshi scan pattern
 
 pub const FLICKER_LENGTH = 3;
+pub const MAX_SPACING_MULTIPLIER = 2;
 
 const Kiroshi = @This();
 
@@ -28,8 +31,8 @@ pub fn init(
         .allocator = allocator,
         .terminal_buffer = terminal_buffer,
         .frames = 0,
-        .density = 10,
-        .delay = 5,
+        .density = 12,
+        .delay = 4,
         .count = 0,
     };
 }
@@ -53,27 +56,14 @@ fn draw(self: *Kiroshi) void {
         var prng = Random.DefaultPrng.init(x);
         const rand = prng.random();
         const bold_rand = rand.int(u32);
-        const slim_rand = rand.int(u32);
-        const slim_offset = rand.int(u32) % (100 / self.density);
+        const space_between = rand.int(u32) % MAX_SPACING_MULTIPLIER;
 
         for (0..self.terminal_buffer.height) |y| {
-            if (self.density == 0 or x % (100 / self.density) == 0 and
-                (bold_rand + y + self.frames) % (FLICKER_LENGTH * 3) < FLICKER_LENGTH)
+            if (self.density == 0 or x % (100 / self.density) == (50 / self.density) and
+                (bold_rand + y + self.frames) % (FLICKER_LENGTH * (2 + space_between)) < FLICKER_LENGTH)
             {
                 const cell = Cell{
-                    .ch = 0x2591,
-                    .fg = 0x0000FF00,
-                    .bg = self.terminal_buffer.bg,
-                };
-
-                cell.put(x, y);
-            }
-
-            if (self.density == 0 or x % (100 / self.density) == slim_offset and
-                (slim_rand + y + self.frames) % (FLICKER_LENGTH * 3) < FLICKER_LENGTH)
-            {
-                const cell = Cell{
-                    .ch = '|', //0x2591,
+                    .ch = 0x2588,
                     .fg = 0x0000FF00,
                     .bg = self.terminal_buffer.bg,
                 };

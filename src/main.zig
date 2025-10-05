@@ -17,6 +17,7 @@ const GameOfLife = @import("animations/GameOfLife.zig");
 const DataStream = @import("animations/DataStream.zig");
 const Interference = @import("animations/Interference.zig");
 const Kiroshi = @import("animations/Kiroshi.zig");
+const Arrowheads = @import("animations/Arrowheads.zig");
 
 const Animation = @import("tui/Animation.zig");
 const TerminalBuffer = @import("tui/TerminalBuffer.zig");
@@ -503,6 +504,13 @@ pub fn main() !void {
         .kiroshi => {
             var kiroshi = try Kiroshi.init(allocator, &buffer);
             animation = kiroshi.animation();
+        },
+        .arrowheads => {
+            // TerminalBuffer.zig init
+            const box_len = (2 * config.margin_box_h) + config.input_len + 1 + labels_max_length;
+            const box_height = (2 * config.margin_box_v) + 7;
+            var arrowheads = try Arrowheads.init(allocator, &buffer, box_len, box_height, config.arrowheads_col1, config.arrowheads_col2, config.arrowheads_col3, config.arrowheads_delay, config.arrowheads_size);
+            animation = arrowheads.animation();
         },
     }
     defer animation.deinit();

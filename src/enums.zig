@@ -7,6 +7,7 @@ pub const Animation = enum {
     datastream,
     interference,
     kiroshi,
+    arrowheads,
 };
 
 pub const DisplayServer = enum {
