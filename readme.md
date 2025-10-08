@@ -1,14 +1,16 @@
 # Fork of the Ly display manager
 
-![Ly screenshot](.github/screenshot.png "Ly screenshot")
-
 Ly is a lightweight TUI (ncurses-like) display manager for Linux and BSD,
 designed with portability in mind (e.g. it does not require systemd to run).
+This fork implements a couple of additional animations.
 
-Join us on Matrix over at [#ly:envs.net](https://matrix.to/#/#ly:envs.net)!
+![Ly datastream screenshot](.github/datastream_screenshot.png "Ly datastream screenshot")
 
-**Note**: Development happens on [Codeberg](https://codeberg.org/fairyglade/ly)
-with a mirror on [GitHub](https://github.com/fairyglade/ly).
+![Ly interference screenshot](.github/interference_screenshot.png "Ly interference screenshot")
+
+![Ly arrowheads screenshot](.github/arrowheads_screenshot.png "Ly arrowheads screenshot")
+
+![Ly perlin screenshot](.github/perlin_screenshot.png "Ly perlin screenshot")
 
 ## Dependencies
 
@@ -38,18 +40,10 @@ It is recommended to add a rule for Ly as it currently does not ship one.
 # dnf install kernel-devel pam-devel libxcb-devel zig xorg-x11-xauth xorg-x11-server brightnessctl
 ```
 
-## Packaging status
-
-[![Packaging status](https://repology.org/badge/vertical-allrepos/ly.svg?exclude_unsupported=1)](https://repology.org/project/ly/versions)
-
 ## Support
 
 Ly has been tested with a wide variety of desktop environments and window
-managers, all of which you can find in the sections below:
-
-[Wayland environments](#supported-wayland-environments)
-
-[X11 environments](#supported-x11-environments)
+managers.
 
 ## Manually building
 
@@ -182,67 +176,3 @@ Use the Up/Down arrow keys to change the current field, and the Left/Right
 arrow keys to scroll through the different fields (whether it be the info line,
 the desktop environment, or the username). The info line is where messages and
 errors are displayed.
-
-## A note on .xinitrc
-
-If your `.xinitrc` file doesn't work ,make sure it is executable and includes a
-shebang. This file is supposed to be a shell script! Quoting from `xinit`'s man
-page:
-
-> If no specific client program is given on the command line, xinit will look
-> for a file in the user's home directory called .xinitrc to run as a shell
-> script to start up client programs.
-
-A typical shebang for a shell script looks like this:
-
-```
-#!/bin/sh
-```
-
-## Tips
-
-- The numlock and capslock state is printed in the top-right corner.
-- Use the F1 and F2 keys to respectively shutdown and reboot.
-- Take a look at your `.xsession` file if X doesn't start, as it can interfere
-  (this file is launched with X to configure the display properly).
-
-## Supported Wayland environments
-
-- budgie
-- cosmic
-- deepin
-- enlightenment
-- gnome
-- hyprland
-- kde
-- labwc
-- niri
-- pantheon
-- sway
-- weston
-
-## Supported X11 environments
-
-- awesome
-- bspwm
-- budgie
-- cinnamon
-- dwm
-- enlightenment
-- gnome
-- kde
-- leftwm
-- lxde
-- mate
-- maxx
-- pantheon
-- qwm
-- spectrwm
-- windowmaker
-- xfce
-- xmonad
-
-## A final note
-
-The name "Ly" is a tribute to the fairy from the game Rayman. Ly was tested by
-oxodao, who is some seriously awesome dude.
