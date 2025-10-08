@@ -15,6 +15,7 @@ fg: u32,
 time_scale: f32,
 distance_scale: f32,
 direction_diagonal: bool,
+gen: znoise.FnlGenerator,
 
 pub fn init(
     allocator: Allocator,
@@ -32,6 +33,10 @@ pub fn init(
         .time_scale = time_scale,
         .distance_scale = distance_scale,
         .direction_diagonal = direction_diagonal,
+        .gen = znoise.FnlGenerator{
+            .noise_type = .perlin,
+            .seed = terminal_buffer.random.int(i32),
+        },
     };
 }
 
@@ -49,10 +54,6 @@ fn draw(self: *Perlin) void {
     const width = self.terminal_buffer.width;
     const height = self.terminal_buffer.height;
 
-    const gen = znoise.FnlGenerator{
-        .noise_type = .perlin,
-    };
-
     for (0..width) |x_u| {
         var x: f32 = @as(f32, @floatFromInt(x_u)) * self.distance_scale;
         if (self.direction_diagonal) {
@@ -67,7 +68,7 @@ fn draw(self: *Perlin) void {
                 .bg = self.terminal_buffer.bg,
             };
 
-            if ((x_u + y_u) % (1 + @as(usize, @intFromFloat(@abs(10 * gen.noise2(x, y))))) == 0) cell.put(x_u, y_u);
+            if ((x_u + y_u) % (1 + @as(usize, @intFromFloat(@abs(10 * self.gen.noise2(x, y))))) == 0) cell.put(x_u, y_u);
         }
     }
 }
