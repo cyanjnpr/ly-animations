@@ -12,6 +12,8 @@ This fork implements a couple of additional animations.
 
 ![Ly perlin screenshot](.github/perlin_screenshot.png "Ly perlin screenshot")
 
+![Ly kiroshi screenshot](.github/kiroshi_screenshot.png "Ly kiroshi screenshot")
+
 ## Dependencies
 
 - Compile-time:

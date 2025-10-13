@@ -9,6 +9,7 @@ pub const Animation = enum {
     kiroshi,
     arrowheads,
     perlin,
+    waveforms,
 };
 
 pub const DisplayServer = enum {

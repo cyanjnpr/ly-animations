@@ -13,6 +13,7 @@ const Random = std.Random;
 
 pub const FLICKER_LENGTH = 3;
 pub const MAX_SPACING_MULTIPLIER = 2;
+pub const BACKGROUND_SPACING = 4;
 
 const Kiroshi = @This();
 
@@ -32,7 +33,7 @@ pub fn init(
         .terminal_buffer = terminal_buffer,
         .frames = 0,
         .density = 12,
-        .delay = 4,
+        .delay = 7,
         .count = 0,
     };
 }
@@ -64,6 +65,14 @@ fn draw(self: *Kiroshi) void {
             {
                 const cell = Cell{
                     .ch = 0x2588,
+                    .fg = 0x0000FF00,
+                    .bg = self.terminal_buffer.bg,
+                };
+
+                cell.put(x, y);
+            } else if (x % BACKGROUND_SPACING == 0 and y % BACKGROUND_SPACING == 0) {
+                const cell = Cell{
+                    .ch = '.',
                     .fg = 0x0000FF00,
                     .bg = self.terminal_buffer.bg,
                 };

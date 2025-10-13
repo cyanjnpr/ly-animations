@@ -15,6 +15,7 @@ fg: u32,
 time_scale: f32,
 distance_scale: f32,
 direction_diagonal: bool,
+sandworm_variant: bool,
 gen: znoise.FnlGenerator,
 
 pub fn init(
@@ -24,6 +25,7 @@ pub fn init(
     time_scale: f32,
     distance_scale: f32,
     direction_diagonal: bool,
+    sandworm_variant: bool,
 ) !Perlin {
     return .{
         .allocator = allocator,
@@ -33,6 +35,7 @@ pub fn init(
         .time_scale = time_scale,
         .distance_scale = distance_scale,
         .direction_diagonal = direction_diagonal,
+        .sandworm_variant = sandworm_variant,
         .gen = znoise.FnlGenerator{
             .noise_type = .perlin,
             .seed = terminal_buffer.random.int(i32),
@@ -68,7 +71,13 @@ fn draw(self: *Perlin) void {
                 .bg = self.terminal_buffer.bg,
             };
 
-            if ((x_u + y_u) % (1 + @as(usize, @intFromFloat(@abs(10 * self.gen.noise2(x, y))))) == 0) cell.put(x_u, y_u);
+            const noise: usize = (1 + @as(usize, @intFromFloat(@abs(10 * self.gen.noise2(x, y)))));
+
+            if (self.sandworm_variant) {
+                if (noise % 2 == 0) cell.put(x_u, y_u);
+            } else {
+                if ((x_u + y_u) % noise == 0) cell.put(x_u, y_u);
+            }
         }
     }
 }

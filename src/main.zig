@@ -19,6 +19,7 @@ const Interference = @import("animations/Interference.zig");
 const Kiroshi = @import("animations/Kiroshi.zig");
 const Arrowheads = @import("animations/Arrowheads.zig");
 const Perlin = @import("animations/Perlin.zig");
+const Waveforms = @import("animations/Waveforms.zig");
 
 const Animation = @import("tui/Animation.zig");
 const TerminalBuffer = @import("tui/TerminalBuffer.zig");
@@ -514,8 +515,12 @@ pub fn main() !void {
             animation = arrowheads.animation();
         },
         .perlin => {
-            var perlin = try Perlin.init(allocator, &buffer, config.perlin_fg, config.perlin_time_scale, config.perlin_distance_scale, config.perlin_direction_diagonal);
+            var perlin = try Perlin.init(allocator, &buffer, config.perlin_fg, config.perlin_time_scale, config.perlin_distance_scale, config.perlin_direction_diagonal, config.perlin_sandworm_variant);
             animation = perlin.animation();
+        },
+        .waveforms => {
+            var waveforms = try Waveforms.init(allocator, &buffer);
+            animation = waveforms.animation();
         },
     }
     defer animation.deinit();
