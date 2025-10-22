@@ -29,10 +29,11 @@ const InfoLine = @import("tui/components/InfoLine.zig");
 const UserList = @import("tui/components/UserList.zig");
 const Config = @import("config/Config.zig");
 const Lang = @import("config/Lang.zig");
-const Save = @import("config/Save.zig");
+const OldSave = @import("config/OldSave.zig");
+const SavedUsers = @import("config/SavedUsers.zig");
 const migrator = @import("config/migrator.zig");
 const SharedError = @import("SharedError.zig");
-const UidRange = @import("UidRange.zig");
+const LogFile = @import("LogFile.zig");
 
 const StringList = std.ArrayListUnmanaged([]const u8);
 const Ini = ini.Ini;
@@ -126,10 +127,14 @@ pub fn main() !void {
 
     var config: Config = undefined;
     var lang: Lang = undefined;
-    var save: Save = undefined;
+    var old_save_file_exists = false;
     var maybe_config_load_error: ?anyerror = null;
     var can_get_lock_state = true;
     var can_draw_clock = true;
+    var can_draw_battery = true;
+
+    var saved_users = SavedUsers.init();
+    defer saved_users.deinit(allocator);
 
     if (res.args.help != 0) {
         try clap.help(stderr, clap.Help, &params, .{});
@@ -151,13 +156,15 @@ pub fn main() !void {
     var lang_ini = Ini(Lang).init(allocator);
     defer lang_ini.deinit();
 
-    var save_ini = Ini(Save).init(allocator);
-    defer save_ini.deinit();
+    var old_save_ini = ini.Ini(OldSave).init(allocator);
+    defer old_save_ini.deinit();
 
-    var save_path: []const u8 = build_options.config_directory ++ "/ly/save.ini";
+    var save_path: []const u8 = build_options.config_directory ++ "/ly/save.txt";
+    var old_save_path: []const u8 = build_options.config_directory ++ "/ly/save.ini";
     var save_path_alloc = false;
     defer {
         if (save_path_alloc) allocator.free(save_path);
+        if (save_path_alloc) allocator.free(old_save_path);
     }
 
     const comment_characters = "#";
@@ -186,18 +193,9 @@ pub fn main() !void {
         }) catch Lang{};
 
         if (config.save) {
-            save_path = try std.fmt.allocPrint(allocator, "{s}{s}save.ini", .{ s, trailing_slash });
+            save_path = try std.fmt.allocPrint(allocator, "{s}{s}save.txt", .{ s, trailing_slash });
+            old_save_path = try std.fmt.allocPrint(allocator, "{s}{s}save.ini", .{ s, trailing_slash });
             save_path_alloc = true;
-
-            var user_buf: [32]u8 = undefined;
-            save = save_ini.readFileToStruct(save_path, .{
-                .fieldHandler = null,
-                .comment_characters = comment_characters,
-            }) catch migrator.tryMigrateSaveFile(&user_buf);
-        }
-
-        if (maybe_config_load_error == null) {
-            migrator.lateConfigFieldHandler(&config);
         }
     } else {
         const config_path = build_options.config_directory ++ "/ly/config.ini";
@@ -218,47 +216,66 @@ pub fn main() !void {
             .fieldHandler = null,
             .comment_characters = comment_characters,
         }) catch Lang{};
+    }
 
-        if (config.save) {
-            var user_buf: [32]u8 = undefined;
-            save = save_ini.readFileToStruct(save_path, .{
-                .fieldHandler = null,
-                .comment_characters = comment_characters,
-            }) catch migrator.tryMigrateSaveFile(&user_buf);
+    if (maybe_config_load_error == null) {
+        migrator.lateConfigFieldHandler(&config);
+    }
+
+    var usernames = try getAllUsernames(allocator, config.login_defs_path);
+    defer {
+        for (usernames.items) |username| allocator.free(username);
+        usernames.deinit(allocator);
+    }
+
+    if (config.save) read_save_file: {
+        old_save_file_exists = migrator.tryMigrateIniSaveFile(allocator, &old_save_ini, old_save_path, &saved_users, usernames.items) catch break :read_save_file;
+
+        // Don't read the new save file if the old one still exists
+        if (old_save_file_exists) break :read_save_file;
+
+        var save_file = std.fs.cwd().openFile(save_path, .{}) catch break :read_save_file;
+        defer save_file.close();
+
+        var file_buffer: [256]u8 = undefined;
+        var file_reader = save_file.reader(&file_buffer);
+        var reader = &file_reader.interface;
+
+        const last_username_index_str = reader.takeDelimiterInclusive('\n') catch break :read_save_file;
+        saved_users.last_username_index = std.fmt.parseInt(usize, last_username_index_str[0..(last_username_index_str.len - 1)], 10) catch break :read_save_file;
+
+        while (reader.seek < reader.buffer.len) {
+            const line = reader.takeDelimiterInclusive('\n') catch break;
+
+            var user = std.mem.splitScalar(u8, line[0..(line.len - 1)], ':');
+            const username = user.next() orelse continue;
+            const session_index_str = user.next() orelse continue;
+
+            const session_index = std.fmt.parseInt(usize, session_index_str, 10) catch continue;
+
+            try saved_users.user_list.append(allocator, .{
+                .username = username,
+                .session_index = session_index,
+            });
         }
 
-        if (maybe_config_load_error == null) {
-            migrator.lateConfigFieldHandler(&config);
+        // If no save file previously existed, fill it up with all usernames
+        if (saved_users.user_list.items.len > 0) break :read_save_file;
+
+        for (usernames.items) |user| {
+            try saved_users.user_list.append(allocator, .{
+                .username = user,
+                .session_index = 0,
+            });
         }
     }
 
-    var log_file: std.fs.File = undefined;
-    defer log_file.close();
+    var log_file_buffer: [1024]u8 = undefined;
 
-    var could_open_log_file = true;
-    open_log_file: {
-        log_file = std.fs.cwd().openFile(config.ly_log, .{ .mode = .write_only }) catch std.fs.cwd().createFile(config.ly_log, .{ .mode = 0o666 }) catch {
-            // If we could neither open an existing log file nor create a new
-            // one, abort.
-            could_open_log_file = false;
-            break :open_log_file;
-        };
-    }
+    var log_file = try LogFile.init(config.ly_log, &log_file_buffer);
+    defer log_file.deinit();
 
-    if (!could_open_log_file) {
-        log_file = try std.fs.openFileAbsolute("/dev/null", .{ .mode = .write_only });
-    }
-
-    var log_buffer: [1024]u8 = undefined;
-    var log_file_writer = log_file.writer(&log_buffer);
-
-    // Seek to the end of the log file
-    if (could_open_log_file) {
-        const stat = try log_file.stat();
-        try log_file_writer.seekTo(stat.size);
-    }
-
-    var log_writer = &log_file_writer.interface;
+    var log_writer = &log_file.file_writer.interface;
 
     // These strings only end up getting freed if the user quits Ly using Ctrl+C, which is fine since in the other cases
     // we end up shutting down or restarting the system
@@ -343,7 +360,7 @@ pub fn main() !void {
         }
     }
 
-    if (!could_open_log_file) {
+    if (!log_file.could_open_log_file) {
         try info_line.addMessage(lang.err_log, config.error_bg, config.error_fg);
         try log_writer.writeAll("failed to open log file\n");
     }
@@ -353,7 +370,9 @@ pub fn main() !void {
         try log_writer.print("failed to set numlock: {s}\n", .{@errorName(err)});
     };
 
-    var session = Session.init(allocator, &buffer);
+    var login: UserList = undefined;
+
+    var session = Session.init(allocator, &buffer, &login);
     defer session.deinit();
 
     addOtherEnvironment(&session, lang, .shell, null) catch |err| {
@@ -404,12 +423,6 @@ pub fn main() !void {
         try crawl(&session, lang, dir, .custom);
     }
 
-    var usernames = try getAllUsernames(allocator, config.login_defs_path);
-    defer {
-        for (usernames.items) |username| allocator.free(username);
-        usernames.deinit(allocator);
-    }
-
     if (usernames.items.len == 0) {
         // If we have no usernames, simply add an error to the info line.
         // This effectively means you can't login, since there would be no local
@@ -419,7 +432,7 @@ pub fn main() !void {
         try log_writer.writeAll("no users found\n");
     }
 
-    var login = try UserList.init(allocator, &buffer, usernames);
+    login = try UserList.init(allocator, &buffer, usernames, &saved_users, &session);
     defer login.deinit();
 
     var password = Text.init(allocator, &buffer, true, config.asterisk);
@@ -430,23 +443,24 @@ pub fn main() !void {
 
     // Load last saved username and desktop selection, if any
     if (config.save) {
-        if (save.user) |user| {
+        if (saved_users.last_username_index) |index| load_last_user: {
+            // If the saved index isn't valid, bail out
+            if (index >= saved_users.user_list.items.len) break :load_last_user;
+
+            const user = saved_users.user_list.items[index];
+
             // Find user with saved name, and switch over to it
             // If it doesn't exist (anymore), we don't change the value
-            // Note that we could instead save the username index, but migrating
-            // from the raw username to an index is non-trivial and I'm lazy :P
             for (usernames.items, 0..) |username, i| {
-                if (std.mem.eql(u8, username, user)) {
+                if (std.mem.eql(u8, username, user.username)) {
                     login.label.current = i;
                     break;
                 }
             }
 
             active_input = .password;
-        }
 
-        if (save.session_index) |session_index| {
-            if (session_index < session.label.list.items.len) session.label.current = session_index;
+            if (user.session_index < session.label.list.items.len) session.label.current = user.session_index;
         }
     }
 
@@ -606,11 +620,13 @@ pub fn main() !void {
                 buffer.drawLabel(ly_version_str, 0, buffer.height - 1);
             }
 
-            var battery_bar_shown = false;
             if (config.battery_id) |id| draw_battery: {
+                if (!can_draw_battery) break :draw_battery;
+
                 const battery_percentage = getBatteryPercentage(id) catch |err| {
                     try log_writer.print("failed to get battery percentage: {s}\n", .{@errorName(err)});
                     try info_line.addMessage(lang.err_battery, config.error_bg, config.error_fg);
+                    can_draw_battery = false;
                     break :draw_battery;
                 };
 
@@ -619,7 +635,7 @@ pub fn main() !void {
 
                 const battery_y: usize = if (config.hide_key_hints) 0 else 1;
                 buffer.drawLabel(battery_str, 0, battery_y);
-                battery_bar_shown = true;
+                can_draw_battery = true;
             }
 
             if (config.bigclock != .none and buffer.box_height + (bigclock.HEIGHT + 2) * 2 < buffer.height) {
@@ -903,31 +919,44 @@ pub fn main() !void {
                 _ = termbox.tb_present();
 
                 if (config.save) save_last_settings: {
-                    var file = std.fs.cwd().createFile(save_path, .{}) catch break :save_last_settings;
+                    // It isn't worth cluttering the code with precise error
+                    // handling, so let's just report a generic error message,
+                    // that should be good enough for debugging anyway.
+                    errdefer log_writer.writeAll("failed to save current user data\n") catch {};
+
+                    var file = std.fs.cwd().createFile(save_path, .{}) catch |err| {
+                        log_writer.print("failed to create save file: {s}\n", .{@errorName(err)}) catch break :save_last_settings;
+                        break :save_last_settings;
+                    };
                     defer file.close();
 
-                    var file_buffer: [64]u8 = undefined;
+                    var file_buffer: [256]u8 = undefined;
                     var file_writer = file.writer(&file_buffer);
                     var writer = &file_writer.interface;
 
-                    const save_data = Save{
-                        .user = login.getCurrentUser(),
-                        .session_index = session.label.current,
-                    };
-                    ini.writeFromStruct(save_data, writer, null, .{}) catch break :save_last_settings;
+                    try writer.print("{d}\n", .{login.label.current});
+                    for (saved_users.user_list.items) |user| {
+                        try writer.print("{s}:{d}\n", .{ user.username, user.session_index });
+                    }
                     try writer.flush();
 
                     // Delete previous save file if it exists
-                    if (migrator.maybe_save_file) |path| std.fs.cwd().deleteFile(path) catch {};
+                    if (migrator.maybe_save_file) |path| {
+                        std.fs.cwd().deleteFile(path) catch {};
+                    } else if (old_save_file_exists) {
+                        std.fs.cwd().deleteFile(old_save_path) catch {};
+                    }
                 }
 
                 var shared_err = try SharedError.init();
                 defer shared_err.deinit();
 
                 {
+                    log_file.deinit();
+
                     session_pid = try std.posix.fork();
                     if (session_pid == 0) {
-                        const current_environment = session.label.list.items[session.label.current];
+                        const current_environment = session.label.list.items[session.label.current].environment;
                         const auth_options = auth.AuthOptions{
                             .tty = active_tty,
                             .service_name = config.service_name,
@@ -948,10 +977,16 @@ pub fn main() !void {
                         };
                         std.posix.sigaction(std.posix.SIG.CHLD, &tty_control_transfer_act, null);
 
-                        auth.authenticate(allocator, log_writer, auth_options, current_environment, login.getCurrentUser(), password.text.items) catch |err| {
+                        try log_file.reinit();
+
+                        auth.authenticate(allocator, &log_file, auth_options, current_environment, login.getCurrentUsername(), password.text.items) catch |err| {
                             shared_err.writeError(err);
+
+                            log_file.deinit();
                             std.process.exit(1);
                         };
+
+                        log_file.deinit();
                         std.process.exit(0);
                     }
 
@@ -960,6 +995,8 @@ pub fn main() !void {
                     // This is a workaround to ensure the session process has exited before re-initializing the TTY.
                     std.Thread.sleep(std.time.ns_per_s * 1);
                     session_pid = -1;
+
+                    try log_file.reinit();
                 }
 
                 // Take back control of the TTY
@@ -1076,7 +1113,7 @@ fn addOtherEnvironment(session: *Session, lang: Lang, display_server: DisplaySer
         .name = name,
         .xdg_session_desktop = null,
         .xdg_desktop_names = null,
-        .cmd = exec orelse "",
+        .cmd = exec,
         .specifier = lang.other,
         .display_server = display_server,
         .is_terminal = display_server == .shell,
@@ -1138,7 +1175,7 @@ fn crawl(session: *Session, lang: Lang, path: []const u8, display_server: Displa
 }
 
 fn getAllUsernames(allocator: std.mem.Allocator, login_defs_path: []const u8) !StringList {
-    const uid_range = try getUserIdRange(allocator, login_defs_path);
+    const uid_range = try interop.getUserIdRange(allocator, login_defs_path);
 
     var usernames: StringList = .empty;
     var maybe_entry = interop.getNextUsernameEntry();
@@ -1156,45 +1193,6 @@ fn getAllUsernames(allocator: std.mem.Allocator, login_defs_path: []const u8) !S
 
     interop.closePasswordDatabase();
     return usernames;
-}
-
-// This is very bad parsing, but we only need to get 2 values... and the format
-// of the file doesn't seem to be standard? So this should be fine...
-fn getUserIdRange(allocator: std.mem.Allocator, login_defs_path: []const u8) !UidRange {
-    const login_defs_file = try std.fs.cwd().openFile(login_defs_path, .{});
-    defer login_defs_file.close();
-
-    const login_defs_buffer = try login_defs_file.readToEndAlloc(allocator, std.math.maxInt(u16));
-    defer allocator.free(login_defs_buffer);
-
-    var iterator = std.mem.splitScalar(u8, login_defs_buffer, '\n');
-    var uid_range = UidRange{};
-
-    while (iterator.next()) |line| {
-        const trimmed_line = std.mem.trim(u8, line, " \n\r\t");
-
-        if (std.mem.startsWith(u8, trimmed_line, "UID_MIN")) {
-            uid_range.uid_min = try parseValue(std.posix.uid_t, "UID_MIN", trimmed_line);
-        } else if (std.mem.startsWith(u8, trimmed_line, "UID_MAX")) {
-            uid_range.uid_max = try parseValue(std.posix.uid_t, "UID_MAX", trimmed_line);
-        }
-    }
-
-    return uid_range;
-}
-
-fn parseValue(comptime T: type, name: []const u8, buffer: []const u8) !T {
-    var iterator = std.mem.splitAny(u8, buffer, " \t");
-    var maybe_value: ?T = null;
-
-    while (iterator.next()) |slice| {
-        // Skip the slice if it's empty (whitespace) or is the name of the
-        // property (e.g. UID_MIN or UID_MAX)
-        if (slice.len == 0 or std.mem.eql(u8, slice, name)) continue;
-        maybe_value = std.fmt.parseInt(T, slice, 10) catch continue;
-    }
-
-    return maybe_value orelse error.ValueNotFound;
 }
 
 fn adjustBrightness(allocator: std.mem.Allocator, cmd: []const u8) !void {

@@ -42,6 +42,12 @@ It is recommended to add a rule for Ly as it currently does not ship one.
 # dnf install kernel-devel pam-devel libxcb-devel zig xorg-x11-xauth xorg-x11-server brightnessctl
 ```
 
+### FreeBSD
+
+```
+# pkg install ca_root_nss libxcb git xorg xauth
+```
+
 ## Support
 
 Ly has been tested with a wide variety of desktop environments and window
@@ -107,9 +113,8 @@ execute the following command:
 # systemctl disable getty@tty2.service
 ```
 
-You can change the TTY Ly will run on by editing the `tty` option in the
-configuration file **and** change which TTY is used in the corresponding
-service file..
+You can change the TTY Ly will run on by editing the corresponding
+service file for your platform.
 
 ### OpenRC
 
@@ -154,6 +159,38 @@ To disable TTY 2, edit `/etc/s6/config/tty2.conf` and set `SPAWN="no"`.
 
 To disable TTY 2, go to `/etc/dinit.d/config/console.conf` and modify
 `ACTIVE_CONSOLES`.
+
+### sysvinit
+
+```
+# zig build installexe -Dinit_system=sysvinit
+# update-rc.d lightdm disable
+# update-rc.d ly defaults
+```
+
+To disable TTY 2, go to `/etc/inittab` and comment out the line containing `tty2`.
+
+### FreeBSD
+
+```
+# zig build installexe -Dprefix_directory=/usr/local -Dconfig_directory=/usr/local/etc -Dinit_system=freebsd
+# sysrc lightdm_enable="NO"
+```
+
+To enable Ly, add the following entry to `/etc/gettytab`:
+
+```
+Ly:\
+	:lo=/usr/local/bin/ly_wrapper:\
+	:al=root:
+```
+
+Then, modify the command field of the `ttyv1` terminal entry in `/etc/ttys`
+(TTYs in FreeBSD start at 0):
+
+```
+ttyv1 "/usr/libexec/getty Ly" xterm on secure
+```
 
 ### Updating
 

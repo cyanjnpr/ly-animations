@@ -5,6 +5,7 @@ const enums = @import("enums.zig");
 const Environment = @import("Environment.zig");
 const interop = @import("interop.zig");
 const SharedError = @import("SharedError.zig");
+const LogFile = @import("LogFile.zig");
 
 const Md5 = std.crypto.hash.Md5;
 const utmp = interop.utmp;
@@ -32,7 +33,7 @@ pub fn sessionSignalHandler(i: c_int) callconv(.c) void {
     if (child_pid > 0) _ = std.c.kill(child_pid, i);
 }
 
-pub fn authenticate(allocator: std.mem.Allocator, log_writer: *std.Io.Writer, options: AuthOptions, current_environment: Environment, login: []const u8, password: []const u8) !void {
+pub fn authenticate(allocator: std.mem.Allocator, log_file: *LogFile, options: AuthOptions, current_environment: Environment, login: []const u8, password: []const u8) !void {
     var tty_buffer: [3]u8 = undefined;
     const tty_str = try std.fmt.bufPrint(&tty_buffer, "{d}", .{options.tty});
 
@@ -57,25 +58,33 @@ pub fn authenticate(allocator: std.mem.Allocator, log_writer: *std.Io.Writer, op
     };
     var handle: ?*interop.pam.pam_handle = undefined;
 
+    var log_writer = &log_file.file_writer.interface;
+
+    try log_writer.writeAll("[pam] starting session\n");
     var status = interop.pam.pam_start(options.service_name, null, &conv, &handle);
     if (status != interop.pam.PAM_SUCCESS) return pamDiagnose(status);
     defer _ = interop.pam.pam_end(handle, status);
 
     // Set PAM_TTY as the current TTY. This is required in case it isn't being set by another PAM module
+    try log_writer.writeAll("[pam] setting tty\n");
     status = interop.pam.pam_set_item(handle, interop.pam.PAM_TTY, pam_tty_str.ptr);
     if (status != interop.pam.PAM_SUCCESS) return pamDiagnose(status);
 
     // Do the PAM routine
+    try log_writer.writeAll("[pam] authenticating\n");
     status = interop.pam.pam_authenticate(handle, 0);
     if (status != interop.pam.PAM_SUCCESS) return pamDiagnose(status);
 
+    try log_writer.writeAll("[pam] validating account\n");
     status = interop.pam.pam_acct_mgmt(handle, 0);
     if (status != interop.pam.PAM_SUCCESS) return pamDiagnose(status);
 
+    try log_writer.writeAll("[pam] setting credentials\n");
     status = interop.pam.pam_setcred(handle, interop.pam.PAM_ESTABLISH_CRED);
     if (status != interop.pam.PAM_SUCCESS) return pamDiagnose(status);
     defer status = interop.pam.pam_setcred(handle, interop.pam.PAM_DELETE_CRED);
 
+    try log_writer.writeAll("[pam] opening session\n");
     status = interop.pam.pam_open_session(handle, 0);
     if (status != interop.pam.PAM_SUCCESS) return pamDiagnose(status);
     defer status = interop.pam.pam_close_session(handle, 0);
@@ -94,15 +103,23 @@ pub fn authenticate(allocator: std.mem.Allocator, log_writer: *std.Io.Writer, op
     var shared_err = try SharedError.init();
     defer shared_err.deinit();
 
+    log_file.deinit();
+
     child_pid = try std.posix.fork();
     if (child_pid == 0) {
-        try log_writer.writeAll("starting session\n");
-        try log_writer.flush();
+        try log_file.reinit();
+        log_writer = &log_file.file_writer.interface;
 
-        startSession(log_writer, allocator, options, tty_str, user_entry, handle, current_environment) catch |e| {
+        try log_writer.writeAll("starting session\n");
+
+        startSession(log_file, allocator, options, tty_str, user_entry, handle, current_environment) catch |e| {
             shared_err.writeError(e);
+
+            log_file.deinit();
             std.process.exit(1);
         };
+
+        log_file.deinit();
         std.process.exit(0);
     }
 
@@ -128,13 +145,15 @@ pub fn authenticate(allocator: std.mem.Allocator, log_writer: *std.Io.Writer, op
     // Wait for the session to stop
     _ = std.posix.waitpid(child_pid, 0);
 
+    try log_file.reinit();
+
     removeUtmpEntry(&entry);
 
     if (shared_err.readError()) |err| return err;
 }
 
 fn startSession(
-    log_writer: *std.Io.Writer,
+    log_file: *LogFile,
     allocator: std.mem.Allocator,
     options: AuthOptions,
     tty_str: []u8,
@@ -166,11 +185,11 @@ fn startSession(
 
     // Execute what the user requested
     switch (current_environment.display_server) {
-        .wayland, .shell, .custom => try executeCmd(log_writer, allocator, user_entry.shell.?, options, current_environment.is_terminal, current_environment.cmd),
+        .wayland, .shell, .custom => try executeCmd(log_file, allocator, user_entry.shell.?, options, current_environment.is_terminal, current_environment.cmd),
         .xinitrc, .x11 => if (build_options.enable_x11_support) {
             var vt_buf: [5]u8 = undefined;
             const vt = try std.fmt.bufPrint(&vt_buf, "vt{d}", .{options.tty});
-            try executeX11Cmd(log_writer, allocator, user_entry.shell.?, user_entry.home.?, options, current_environment.cmd, vt);
+            try executeX11Cmd(log_file, allocator, user_entry.shell.?, user_entry.home.?, options, current_environment.cmd orelse "", vt);
         },
     }
 }
@@ -303,7 +322,7 @@ fn getXPid(display_num: u8) !i32 {
     return std.fmt.parseInt(i32, std.mem.trim(u8, buffer[0..written], " "), 10);
 }
 
-fn createXauthFile(pwd: []const u8) ![]const u8 {
+fn createXauthFile(pwd: []const u8, buffer: []u8) ![]const u8 {
     var xauth_buf: [100]u8 = undefined;
     var xauth_dir: []const u8 = undefined;
     const xdg_rt_dir = std.posix.getenv("XDG_RUNTIME_DIR");
@@ -345,8 +364,7 @@ fn createXauthFile(pwd: []const u8) ![]const u8 {
     while (xauth_dir[i] == '/') i -= 1;
     const trimmed_xauth_dir = xauth_dir[0 .. i + 1];
 
-    var buf: [256]u8 = undefined;
-    const xauthority: []u8 = try std.fmt.bufPrint(&buf, "{s}/{s}", .{ trimmed_xauth_dir, xauth_file });
+    const xauthority: []u8 = try std.fmt.bufPrint(buffer, "{s}/{s}", .{ trimmed_xauth_dir, xauth_file });
     const file = try std.fs.createFileAbsolute(xauthority, .{});
     file.close();
 
@@ -363,8 +381,8 @@ fn mcookie() [Md5.digest_length * 2]u8 {
     return std.fmt.bytesToHex(&out, .lower);
 }
 
-fn xauth(log_writer: *std.Io.Writer, allocator: std.mem.Allocator, display_name: []u8, shell: [*:0]const u8, home: []const u8, options: AuthOptions) !void {
-    const xauthority = try createXauthFile(home);
+fn xauth(log_file: *LogFile, allocator: std.mem.Allocator, display_name: []u8, shell: [*:0]const u8, home: []const u8, xauth_buffer: []u8, options: AuthOptions) !void {
+    const xauthority = try createXauthFile(home, xauth_buffer);
     try interop.setEnvironmentVariable(allocator, "XAUTHORITY", xauthority, true);
     try interop.setEnvironmentVariable(allocator, "DISPLAY", display_name, true);
 
@@ -382,12 +400,16 @@ fn xauth(log_writer: *std.Io.Writer, allocator: std.mem.Allocator, display_name:
 
     const status = std.posix.waitpid(pid, 0);
     if (status.status != 0) {
-        try log_writer.print("xauth command failed with status {d}\n", .{status.status});
+        try log_file.file_writer.interface.print("xauth command failed with status {d}\n", .{status.status});
         return error.XauthFailed;
     }
 }
 
-fn executeX11Cmd(log_writer: *std.Io.Writer, allocator: std.mem.Allocator, shell: []const u8, home: []const u8, options: AuthOptions, desktop_cmd: []const u8, vt: []const u8) !void {
+fn executeX11Cmd(log_file: *LogFile, allocator: std.mem.Allocator, shell: []const u8, home: []const u8, options: AuthOptions, desktop_cmd: []const u8, vt: []const u8) !void {
+    var log_writer = &log_file.file_writer.interface;
+    var xauth_buffer: [256]u8 = undefined;
+
+    try log_writer.writeAll("[x11] getting free display\n");
     const display_num = try getFreeDisplay();
     var buf: [4]u8 = undefined;
     const display_name = try std.fmt.bufPrint(&buf, ":{d}", .{display_num});
@@ -395,8 +417,10 @@ fn executeX11Cmd(log_writer: *std.Io.Writer, allocator: std.mem.Allocator, shell
     const shell_z = try allocator.dupeZ(u8, shell);
     defer allocator.free(shell_z);
 
-    try xauth(log_writer, allocator, display_name, shell_z, home, options);
+    try log_writer.writeAll("[x11] creating xauth file\n");
+    try xauth(log_file, allocator, display_name, shell_z, home, &xauth_buffer, options);
 
+    try log_writer.writeAll("[x11] starting x server\n");
     const pid = try std.posix.fork();
     if (pid == 0) {
         var cmd_buffer: [1024]u8 = undefined;
@@ -419,8 +443,10 @@ fn executeX11Cmd(log_writer: *std.Io.Writer, allocator: std.mem.Allocator, shell
 
     // X Server detaches from the process.
     // PID can be fetched from /tmp/X{d}.lock
+    try log_writer.writeAll("[x11] getting x server pid\n");
     const x_pid = try getXPid(display_num);
 
+    try log_writer.writeAll("[x11] launching environment\n");
     xorg_pid = try std.posix.fork();
     if (xorg_pid == 0) {
         var cmd_buffer: [1024]u8 = undefined;
@@ -450,14 +476,14 @@ fn executeX11Cmd(log_writer: *std.Io.Writer, allocator: std.mem.Allocator, shell
     _ = std.posix.waitpid(x_pid, 0);
 }
 
-fn executeCmd(log_writer: *std.Io.Writer, allocator: std.mem.Allocator, shell: []const u8, options: AuthOptions, is_terminal: bool, exec_cmd: []const u8) !void {
+fn executeCmd(global_log_file: *LogFile, allocator: std.mem.Allocator, shell: []const u8, options: AuthOptions, is_terminal: bool, exec_cmd: ?[]const u8) !void {
     var maybe_log_file: ?std.fs.File = null;
     if (!is_terminal) {
         // For custom desktop entries, the "Terminal" value here determines if
         // we redirect standard output & error or not. That is, we redirect only
         // if it's equal to false (so if it's not running in a TTY).
         if (options.session_log) |log_path| {
-            maybe_log_file = try redirectStandardStreams(log_writer, log_path, true);
+            maybe_log_file = try redirectStandardStreams(global_log_file, log_path, true);
         }
     }
     defer if (maybe_log_file) |log_file| log_file.close();
@@ -466,18 +492,18 @@ fn executeCmd(log_writer: *std.Io.Writer, allocator: std.mem.Allocator, shell: [
     defer allocator.free(shell_z);
 
     var cmd_buffer: [1024]u8 = undefined;
-    const cmd_str = try std.fmt.bufPrintZ(&cmd_buffer, "{s} {s} {s}", .{ options.setup_cmd, options.login_cmd orelse "", exec_cmd });
+    const cmd_str = try std.fmt.bufPrintZ(&cmd_buffer, "{s} {s} {s}", .{ options.setup_cmd, options.login_cmd orelse "", exec_cmd orelse shell });
 
     const args = [_:null]?[*:0]const u8{ shell_z, "-c", cmd_str };
     return std.posix.execveZ(shell_z, &args, std.c.environ);
 }
 
-fn redirectStandardStreams(log_writer: *std.Io.Writer, session_log: []const u8, create: bool) !std.fs.File {
+fn redirectStandardStreams(global_log_file: *LogFile, session_log: []const u8, create: bool) !std.fs.File {
     const log_file = if (create) (std.fs.cwd().createFile(session_log, .{ .mode = 0o666 }) catch |err| {
-        try log_writer.print("failed to create new session log file: {s}\n", .{@errorName(err)});
+        try global_log_file.file_writer.interface.print("failed to create new session log file: {s}\n", .{@errorName(err)});
         return err;
     }) else (std.fs.cwd().openFile(session_log, .{ .mode = .read_write }) catch |err| {
-        try log_writer.print("failed to open existing session log file: {s}\n", .{@errorName(err)});
+        try global_log_file.file_writer.interface.print("failed to open existing session log file: {s}\n", .{@errorName(err)});
         return err;
     });
 
@@ -491,14 +517,17 @@ fn addUtmpEntry(entry: *Utmp, username: []const u8, pid: c_int) !void {
     entry.ut_type = utmp.USER_PROCESS;
     entry.ut_pid = pid;
 
-    var buf: [4096]u8 = undefined;
-    const ttyname = try std.os.getFdPath(std.posix.STDIN_FILENO, &buf);
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tty_path = try std.os.getFdPath(std.posix.STDIN_FILENO, &buf);
 
+    // Get the TTY name (i.e. without the /dev/ prefix)
     var ttyname_buf: [@sizeOf(@TypeOf(entry.ut_line))]u8 = undefined;
-    _ = try std.fmt.bufPrintZ(&ttyname_buf, "{s}", .{ttyname["/dev/".len..]});
+    _ = try std.fmt.bufPrintZ(&ttyname_buf, "{s}", .{tty_path["/dev/".len..]});
 
     entry.ut_line = ttyname_buf;
-    entry.ut_id = ttyname_buf["tty".len..7].*;
+    // Get the TTY ID (i.e. without the tty prefix) and truncate it to the size
+    // of ut_id if necessary
+    entry.ut_id = ttyname_buf["tty".len..(@sizeOf(@TypeOf(entry.ut_id)) + "tty".len)].*;
 
     var username_buf: [@sizeOf(@TypeOf(entry.ut_user))]u8 = undefined;
     _ = try std.fmt.bufPrintZ(&username_buf, "{s}", .{username});
@@ -515,7 +544,11 @@ fn addUtmpEntry(entry: *Utmp, username: []const u8, pid: c_int) !void {
         .tv_sec = @intCast(time.seconds),
         .tv_usec = @intCast(time.microseconds),
     };
-    entry.ut_addr_v6[0] = 0;
+
+    // FreeBSD doesn't have this field
+    if (builtin.os.tag == .linux) {
+        entry.ut_addr_v6[0] = 0;
+    }
 
     utmp.setutxent();
     _ = utmp.pututxline(entry);

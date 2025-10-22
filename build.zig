@@ -8,6 +8,8 @@ const InitSystem = enum {
     runit,
     s6,
     dinit,
+    sysvinit,
+    freebsd,
 };
 
 const min_zig_string = "0.15.0";
@@ -21,7 +23,7 @@ comptime {
     }
 }
 
-const ly_version = std.SemanticVersion{ .major = 1, .minor = 2, .patch = 0 };
+const ly_version = std.SemanticVersion{ .major = 1, .minor = 3, .patch = 0 };
 
 var dest_directory: []const u8 = undefined;
 var config_directory: []const u8 = undefined;
@@ -41,7 +43,7 @@ pub fn build(b: *std.Build) !void {
     const version_str = try getVersionStr(b, "ly", ly_version);
     const enable_x11_support = b.option(bool, "enable_x11_support", "Enable X11 support (default is on)") orelse true;
     const default_tty = b.option(u8, "default_tty", "Set the TTY (default is 2)") orelse 2;
-    const fallback_tty = b.option(u8, "fallback_tty", "Set the fallback TTY (default is 1). This value gets embedded into the binary") orelse 1;
+    const fallback_tty = b.option(u8, "fallback_tty", "Set the fallback TTY (default is 2). This value gets embedded into the binary") orelse 2;
 
     default_tty_str = try std.fmt.allocPrint(b.allocator, "{d}", .{default_tty});
 
@@ -62,6 +64,8 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = optimize,
         }),
+        // Here until the native backend matures in terms of performance
+        .use_llvm = true,
     });
 
     const zigini = b.dependency("zigini", .{ .target = target, .optimize = optimize });
@@ -134,6 +138,10 @@ pub fn Installer(install_config: bool) type {
             try patch_map.put("$PREFIX_DIRECTORY", prefix_directory);
             try patch_map.put("$EXECUTABLE_NAME", executable_name);
 
+            // The "-a" argument doesn't exist on FreeBSD, so we use "-p"
+            // instead to shutdown the system.
+            try patch_map.put("$PLATFORM_SHUTDOWN_ARG", if (init_system == .freebsd) "-p" else "-a");
+
             try install_ly(allocator, patch_map, install_config);
             try install_service(allocator, patch_map);
         }
@@ -200,26 +208,32 @@ fn install_ly(allocator: std.mem.Allocator, patch_map: PatchMap, install_config:
         var lang_dir = std.fs.cwd().openDir(ly_lang_path, .{}) catch unreachable;
         defer lang_dir.close();
 
-        try installFile("res/lang/ar.ini", lang_dir, ly_lang_path, "ar.ini", .{});
-        try installFile("res/lang/cat.ini", lang_dir, ly_lang_path, "cat.ini", .{});
-        try installFile("res/lang/cs.ini", lang_dir, ly_lang_path, "cs.ini", .{});
-        try installFile("res/lang/de.ini", lang_dir, ly_lang_path, "de.ini", .{});
-        try installFile("res/lang/en.ini", lang_dir, ly_lang_path, "en.ini", .{});
-        try installFile("res/lang/es.ini", lang_dir, ly_lang_path, "es.ini", .{});
-        try installFile("res/lang/fr.ini", lang_dir, ly_lang_path, "fr.ini", .{});
-        try installFile("res/lang/it.ini", lang_dir, ly_lang_path, "it.ini", .{});
-        try installFile("res/lang/ja_JP.ini", lang_dir, ly_lang_path, "ja_JP.ini", .{});
-        try installFile("res/lang/lv.ini", lang_dir, ly_lang_path, "lv.ini", .{});
-        try installFile("res/lang/pl.ini", lang_dir, ly_lang_path, "pl.ini", .{});
-        try installFile("res/lang/pt.ini", lang_dir, ly_lang_path, "pt.ini", .{});
-        try installFile("res/lang/pt_BR.ini", lang_dir, ly_lang_path, "pt_BR.ini", .{});
-        try installFile("res/lang/ro.ini", lang_dir, ly_lang_path, "ro.ini", .{});
-        try installFile("res/lang/ru.ini", lang_dir, ly_lang_path, "ru.ini", .{});
-        try installFile("res/lang/sr.ini", lang_dir, ly_lang_path, "sr.ini", .{});
-        try installFile("res/lang/sv.ini", lang_dir, ly_lang_path, "sv.ini", .{});
-        try installFile("res/lang/tr.ini", lang_dir, ly_lang_path, "tr.ini", .{});
-        try installFile("res/lang/uk.ini", lang_dir, ly_lang_path, "uk.ini", .{});
-        try installFile("res/lang/zh_CN.ini", lang_dir, ly_lang_path, "zh_CN.ini", .{});
+        const languages = [_][]const u8{
+            "ar.ini",
+            "cat.ini",
+            "cs.ini",
+            "de.ini",
+            "en.ini",
+            "es.ini",
+            "fr.ini",
+            "it.ini",
+            "ja_JP.ini",
+            "lv.ini",
+            "pl.ini",
+            "pt.ini",
+            "pt_BR.ini",
+            "ro.ini",
+            "ru.ini",
+            "sr.ini",
+            "sv.ini",
+            "tr.ini",
+            "uk.ini",
+            "zh_CN.ini",
+        };
+
+        inline for (languages) |language| {
+            try installFile("res/lang/" ++ language, lang_dir, ly_lang_path, language, .{});
+        }
     }
 
     {
@@ -233,7 +247,7 @@ fn install_ly(allocator: std.mem.Allocator, patch_map: PatchMap, install_config:
         var pam_dir = std.fs.cwd().openDir(pam_path, .{}) catch unreachable;
         defer pam_dir.close();
 
-        try installFile("res/pam.d/ly", pam_dir, pam_path, "ly", .{ .override_mode = 0o644 });
+        try installFile(if (init_system == .freebsd) "res/pam.d/ly-freebsd" else "res/pam.d/ly-linux", pam_dir, pam_path, "ly", .{ .override_mode = 0o644 });
     }
 }
 
@@ -304,6 +318,23 @@ fn install_service(allocator: std.mem.Allocator, patch_map: PatchMap) !void {
             const patched_service = try patchFile(allocator, "res/ly-dinit", patch_map);
             try installText(patched_service, service_dir, service_path, "ly", .{});
         },
+        .sysvinit => {
+            const service_path = try std.fs.path.join(allocator, &[_][]const u8{ dest_directory, config_directory, "/init.d" });
+            std.fs.cwd().makePath(service_path) catch {};
+            var service_dir = std.fs.cwd().openDir(service_path, .{}) catch unreachable;
+            defer service_dir.close();
+
+            const patched_service = try patchFile(allocator, "res/ly-sysvinit", patch_map);
+            try installText(patched_service, service_dir, service_path, "ly", .{ .mode = 0o755 });
+        },
+        .freebsd => {
+            const exe_path = try std.fs.path.join(allocator, &[_][]const u8{ dest_directory, prefix_directory, "/bin" });
+            var executable_dir = std.fs.cwd().openDir(exe_path, .{}) catch unreachable;
+            defer executable_dir.close();
+
+            const patched_wrapper = try patchFile(allocator, "res/ly-freebsd-wrapper", patch_map);
+            try installText(patched_wrapper, executable_dir, exe_path, "ly_wrapper", .{ .mode = 0o755 });
+        },
     }
 }
 
@@ -335,6 +366,8 @@ pub fn Uninstaller(uninstall_config: bool) type {
                     try deleteFile(allocator, config_directory, "/s6/adminsv/default/contents.d/ly-srv", "s6 admin service not found");
                 },
                 .dinit => try deleteFile(allocator, config_directory, "/dinit.d/ly", "dinit service not found"),
+                .sysvinit => try deleteFile(allocator, config_directory, "/init.d/ly", "sysvinit service not found"),
+                .freebsd => try deleteFile(allocator, prefix_directory, "/bin/ly_wrapper", "freebsd wrapper not found"),
             }
         }
     };
