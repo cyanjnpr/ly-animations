@@ -488,6 +488,21 @@ pub fn main() !void {
     // Initialize the animation, if any
     var animation: Animation = undefined;
 
+    // no fallthrough in this lang
+    switch (config.animation) {
+        .cyanjnpr => {
+            const cyanjnpr_animations = [_]enums.Animation{
+                .datastream,
+                .interference,
+                .arrowheads,
+                .perlin,
+                .kiroshi,
+                // .waveforms,
+            };
+            config.animation = cyanjnpr_animations[buffer.random.intRangeLessThan(usize, 0, cyanjnpr_animations.len)];
+        },
+        else => {},
+    }
     switch (config.animation) {
         .none => {
             var dummy = Dummy{};
@@ -518,7 +533,7 @@ pub fn main() !void {
             animation = interference.animation();
         },
         .kiroshi => {
-            var kiroshi = try Kiroshi.init(allocator, &buffer);
+            var kiroshi = try Kiroshi.init(allocator, &buffer, config.kiroshi_fg, config.kiroshi_delay);
             animation = kiroshi.animation();
         },
         .arrowheads => {
@@ -533,9 +548,10 @@ pub fn main() !void {
             animation = perlin.animation();
         },
         .waveforms => {
-            var waveforms = try Waveforms.init(allocator, &buffer);
+            var waveforms = try Waveforms.init(allocator, &buffer, 500);
             animation = waveforms.animation();
         },
+        else => {},
     }
     defer animation.deinit();
 

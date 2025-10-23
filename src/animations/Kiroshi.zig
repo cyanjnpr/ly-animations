@@ -20,6 +20,7 @@ const Kiroshi = @This();
 allocator: Allocator,
 terminal_buffer: *TerminalBuffer,
 frames: u64,
+fg: u32,
 density: usize,
 delay: usize,
 count: usize,
@@ -27,13 +28,16 @@ count: usize,
 pub fn init(
     allocator: Allocator,
     terminal_buffer: *TerminalBuffer,
+    fg: u32,
+    delay: usize,
 ) !Kiroshi {
     return .{
         .allocator = allocator,
         .terminal_buffer = terminal_buffer,
         .frames = 0,
+        .fg = fg,
         .density = 12,
-        .delay = 7,
+        .delay = delay,
         .count = 0,
     };
 }
@@ -53,6 +57,8 @@ fn draw(self: *Kiroshi) void {
         self.count = 0;
     }
 
+    const glitch_cell_y = (self.frames) % self.terminal_buffer.height;
+
     for (0..self.terminal_buffer.width) |x| {
         var prng = Random.DefaultPrng.init(x);
         const rand = prng.random();
@@ -65,15 +71,23 @@ fn draw(self: *Kiroshi) void {
             {
                 const cell = Cell{
                     .ch = 0x2588,
-                    .fg = 0x0000FF00,
+                    .fg = self.fg,
                     .bg = self.terminal_buffer.bg,
                 };
 
-                cell.put(x, y);
+                if ((glitch_cell_y == y or glitch_cell_y + 1 == y or glitch_cell_y + 2 == y)) {
+                    if (x == 0) {
+                        cell.put(self.terminal_buffer.width - 1, y);
+                    } else {
+                        cell.put(x - 1, y);
+                    }
+                } else {
+                    cell.put(x, y);
+                }
             } else if (x % BACKGROUND_SPACING == 0 and y % BACKGROUND_SPACING == 0) {
                 const cell = Cell{
                     .ch = '.',
-                    .fg = 0x0000FF00,
+                    .fg = self.fg,
                     .bg = self.terminal_buffer.bg,
                 };
 

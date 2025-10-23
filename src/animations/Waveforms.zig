@@ -16,10 +16,13 @@ terminal_buffer: *TerminalBuffer,
 frames: u16,
 direction_pos: bool,
 current_waveform: u2,
+period: usize,
+multiplier: f32,
 
 pub fn init(
     allocator: Allocator,
     terminal_buffer: *TerminalBuffer,
+    period: usize,
 ) !Waveforms {
     return .{
         .allocator = allocator,
@@ -27,6 +30,8 @@ pub fn init(
         .frames = 0,
         .direction_pos = true,
         .current_waveform = 0,
+        .period = period,
+        .multiplier = 5 / @as(f32, @floatFromInt(period)),
     };
 }
 
@@ -56,15 +61,15 @@ fn draw(self: *Waveforms) void {
                 const sign = @as(f32, @floatFromInt(@intFromBool(self.direction_pos))) * 2 - 1;
                 const cell_y = @as(i32, @intCast(y)) +
                     @as(i32, @intFromFloat(sign * waveform(self, x) *
-                        0.01 * (@as(f32, @floatFromInt(self.frames % 500))) *
-                        0.01 * (@as(f32, @floatFromInt(500 - self.frames % 500)))));
+                        self.multiplier * (@as(f32, @floatFromInt(self.frames % self.period))) *
+                        self.multiplier * (@as(f32, @floatFromInt(self.period - self.frames % self.period)))));
                 if (cell_y > 0 and cell_y < height) {
                     cell.put(x, @as(u32, @intCast(cell_y)));
                 }
             }
         }
     }
-    if (self.frames % 500 == 0) {
+    if (self.frames % self.period == 0) {
         self.direction_pos = !self.direction_pos;
         if (self.direction_pos) {
             self.current_waveform +%= 1;
@@ -77,7 +82,8 @@ fn waveform(self: *Waveforms, x: usize) f32 {
     switch (self.current_waveform) {
         0 => return sine(x),
         1 => return triangle(x),
-        2 => return square(x),
+        2 => return sawtooth(x),
+        // 3 => return square(x),
         else => return 0,
     }
 }
@@ -94,8 +100,16 @@ fn triangle(x: usize) f32 {
     return normalized_x;
 }
 
+fn sawtooth(x: usize) f32 {
+    var normalized_x: f32 = @mod(@as(f32, @floatFromInt(x)) * SCALE, 2 * math.pi);
+    normalized_x = (0 - normalized_x) / math.pi;
+    return normalized_x;
+}
+
+// looks bad
 fn square(x: usize) f32 {
     const normalized_x: f32 = @mod(@as(f32, @floatFromInt(x)) * SCALE, 2 * math.pi);
+    // if (@abs(normalized_x - math.pi) <= 0.3 or @abs(normalized_x - math.pi) >= math.pi - 0.3) return 0;
     if (normalized_x < math.pi) {
         return 1;
     } else if (normalized_x > math.pi) {
