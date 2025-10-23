@@ -554,7 +554,7 @@ pub fn main() !void {
             animation = waveforms.animation();
         },
         .colorbars => {
-            var colorbars = ColorBars.init(&buffer, 0);
+            var colorbars = ColorBars.init(&buffer, config.colorbars_brightness, config.colorbars_glitch_amplitude, config.colorbars_glitch_scale);
             animation = colorbars.animation();
         },
     }
