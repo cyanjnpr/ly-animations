@@ -14,6 +14,8 @@ This fork implements a couple of additional animations.
 
 ![Ly kiroshi screenshot](.github/kiroshi_screenshot.png "Ly kiroshi screenshot")
 
+![Ly colorbars screenshot](.github/colorbars_screenshot.png "Ly colorbars screenshot")
+
 ## Dependencies
 
 - Compile-time:

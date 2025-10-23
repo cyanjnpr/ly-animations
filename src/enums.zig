@@ -11,6 +11,7 @@ pub const Animation = enum {
     arrowheads,
     perlin,
     waveforms,
+    colorbars,
 };
 
 pub const DisplayServer = enum {

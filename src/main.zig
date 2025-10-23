@@ -20,6 +20,7 @@ const Kiroshi = @import("animations/Kiroshi.zig");
 const Arrowheads = @import("animations/Arrowheads.zig");
 const Perlin = @import("animations/Perlin.zig");
 const Waveforms = @import("animations/Waveforms.zig");
+const ColorBars = @import("animations/ColorBars.zig");
 
 const Animation = @import("tui/Animation.zig");
 const TerminalBuffer = @import("tui/TerminalBuffer.zig");
@@ -498,13 +499,14 @@ pub fn main() !void {
                 .perlin,
                 .kiroshi,
                 // .waveforms,
+                .colorbars,
             };
             config.animation = cyanjnpr_animations[buffer.random.intRangeLessThan(usize, 0, cyanjnpr_animations.len)];
         },
         else => {},
     }
     switch (config.animation) {
-        .none => {
+        .none, .cyanjnpr => {
             var dummy = Dummy{};
             animation = dummy.animation();
         },
@@ -551,7 +553,10 @@ pub fn main() !void {
             var waveforms = try Waveforms.init(allocator, &buffer, 500);
             animation = waveforms.animation();
         },
-        else => {},
+        .colorbars => {
+            var colorbars = ColorBars.init(&buffer, 0);
+            animation = colorbars.animation();
+        },
     }
     defer animation.deinit();
 
